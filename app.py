@@ -563,11 +563,12 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-                img_path = row["filename"]
-                if os.path.exists(img_path):
-                    st.image(Image.open(img_path), use_column_width=True)
-                else:
-                    st.warning("File tidak ditemukan")
+                # ── SOLUSI: PAKAI URL DARI ID, JANGAN PAKAI FILENAME KAGGLE ──
+                product_id = str(row["id"])
+                img_url = f"https://assets.myntassets.com/assets/images/{product_id}.jpg"
+                
+                # Langsung tampilkan pake URL
+                st.image(img_url, use_column_width=True)
 
                 st.markdown(f"""
                     <p class="score-text">
@@ -577,17 +578,9 @@ with right_col:
                     <div class="score-bar-bg">
                         <div class="score-bar-fill" style="width:{score_pct}%"></div>
                     </div>
-                    <p class="product-id">ID: {row['id']}</p>
+                    <p class="product-id">ID: {product_id}</p>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-
-    else:
-        st.markdown("""
-        <div class="empty-state">
-            <span class="empty-icon">👕</span>
-            <p class="empty-text">Upload gambar atau ambil foto untuk memulai pencarian</p>
-        </div>
-        """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────
