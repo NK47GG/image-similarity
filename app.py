@@ -31,7 +31,7 @@ IMG_SIZE        = (128, 128)
 IMG_SHAPE       = (128, 128, 3)
 LATENT_DIM      = 256
 TOP_K           = 5
-ENCODER_WEIGHTS = "encoder_only.weights.h5"
+ENCODER_WEIGHTS = "encoder_only_weights.weights.h5"
 DATABASE_PATH   = "database.pkl"
 
 
