@@ -1,4 +1,3 @@
-# app.py
 import os
 import sys
 import numpy as np
@@ -87,7 +86,7 @@ html, body, [class*="css"] {
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #FFFFFF !important; /* Paksa Putih agar kontras di BG Gelap */
+    color: #FFFFFF !important;
     margin-bottom: 12px;
 }
 
@@ -139,17 +138,11 @@ def load_database():
 
 @st.cache_data
 def load_image_lookup():
-    """Membangun kamus ID -> URL dari images.csv"""
+    """Membangun kamus ID -> URL dari kolom 'link' di images.csv"""
     if os.path.exists(LOOKUP_CSV):
         df_img = pd.read_csv(LOOKUP_CSV)
-        lookup = {}
-        for _, row in df_img.iterrows():
-            raw_val = str(row['filename'])
-            # Operasi sesar: ambil link asli dari string absurd
-            if "http" in raw_val:
-                url = "http" + raw_val.split("http")[-1]
-                lookup[row['id']] = url
-        return lookup
+        if 'id' in df_img.columns and 'link' in df_img.columns:
+            return dict(zip(df_img['id'], df_img['link']))
     return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -201,15 +194,13 @@ with right_col:
             row = db_df.iloc[idx]
             with cols[rank-1]:
                 pid = row['id']
-                
-                # ── LOGIKA LOOKUP ──
-                # Cek di images.csv dulu, kalau gak ada baru fallback ke Myntra standar
                 img_url = image_lookup.get(pid)
-                if not img_url:
-                    img_url = f"https://assets.myntassets.com/assets/images/{pid}.jpg"
-                
+
                 st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
-                st.image(img_url, use_column_width=True)
+                if img_url:
+                    st.image(img_url, use_column_width=True)
+                else:
+                    st.warning(f"Gambar tidak ditemukan untuk ID: {pid}")
                 st.markdown(f"""
                     <p style='color:#AAA; font-size:0.7rem; margin:10px 0 0;'>#{rank}</p>
                     <p style='font-size:0.85rem; color:#FFF;'>Match: <span class="score-value">{scores[idx]:.3f}</span></p>
