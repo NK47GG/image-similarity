@@ -207,7 +207,7 @@ with right_col:
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                #st.write(list(image_lookup.items())[:3])  # lihat sample key-value
-                #st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
+                st.write(list(image_lookup.items())[:3])  # lihat sample key-value
+                st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
     else:
         st.info("Silakan upload gambar untuk melihat hasil.")
