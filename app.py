@@ -282,7 +282,7 @@ def build_autoencoder(input_shape=IMG_SHAPE, latent_dim=LATENT_DIM):
 @st.cache_resource(show_spinner="Memuat encoder model…")
 def load_encoder():
     autoencoder, encoder = build_autoencoder()
-    autoencoder.load_weights(ENCODER_WEIGHTS)
+    encoder.load_weights(ENCODER_WEIGHTS)
     return encoder
 
 
