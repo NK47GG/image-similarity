@@ -14,10 +14,6 @@ import streamlit as st
 from PIL import Image
 import joblib
 
-import sys
-import numpy.core
-sys.modules['numpy._core'] = numpy.core
-
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
