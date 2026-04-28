@@ -197,7 +197,7 @@ with right_col:
                 img_url = image_lookup.get(pid)
 
                 st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
-                if img_url:
+                if true:
                     st.image(img_url, use_column_width=True)
                 else:
                     st.warning(f"Gambar tidak ditemukan untuk ID: {pid}")
