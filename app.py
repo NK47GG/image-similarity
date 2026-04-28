@@ -1,583 +1,602 @@
-import streamlit as st
-import numpy as np
-from PIL import Image
-import os
+# app.py
+"""
+Streamlit App — Visually Similar Product Recommendation
+Dataset  : Fashion Product Images (Shirts only)
+Model    : Convolutional Autoencoder (encoder_weights.h5)
+Database : Embeddings dari test split (database.pkl)
 
-# ── Page config ──────────────────────────────────────────────────────────────
+Run : streamlit run app.py
+"""
+
+import os
+import numpy as np
+import streamlit as st
+from PIL import Image
+import joblib
+
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import (
+    Input, Conv2D, MaxPooling2D, Flatten, Dense, Reshape,
+    Conv2DTranspose, UpSampling2D,
+)
+from tensorflow.keras.preprocessing.image import img_to_array
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+# ─────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────
+IMG_SIZE        = (128, 128)
+IMG_SHAPE       = (128, 128, 3)
+LATENT_DIM      = 256
+TOP_K           = 5
+ENCODER_WEIGHTS = "encoder_only_weights.weights.h5"
+DATABASE_PATH   = "database.pkl"
+
+
+# ─────────────────────────────────────────────────────────────
+# PAGE CONFIG & CUSTOM CSS
+# ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="ShirtFinder — Visual Search",
-    page_icon="👔",
-    layout="wide",
-    initial_sidebar_state="collapsed",
+    page_title = "ShirtFinder — Visual Search",
+    page_icon  = "🔍",
+    layout     = "wide",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* Import Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=DM+Sans:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap');
 
-/* Root Variables */
-:root {
-    --primary: #1a1a2e;
-    --accent: #e94560;
-    --accent2: #0f3460;
-    --gold: #f5a623;
-    --surface: #16213e;
-    --card-bg: #0f3460;
-    --text-muted: #8892a4;
-    --success: #00c9a7;
-    --bg: #0d0d1a;
-}
-
-/* Global */
+/* ── Global ───────────────────────────────────────────────── */
 html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-    background-color: var(--bg) !important;
-    color: #e8eaf0 !important;
+    font-family: 'Space Grotesk', sans-serif;
 }
 
-/* Hide Streamlit chrome */
 #MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 0 2rem 2rem; max-width: 1400px; }
 
-/* ── Hero Header ── */
-.hero-header {
-    background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 50%, #1a1a2e 100%);
-    border-bottom: 1px solid rgba(233,69,96,0.3);
-    padding: 2.5rem 2rem 2rem;
-    margin: -1rem -2rem 2rem;
-    position: relative;
-    overflow: hidden;
+/* ── App background: deep dark ombre ─────────────────────── */
+.stApp {
+    background: linear-gradient(135deg, #0A0A14 0%, #0D0D20 30%, #0F0A1A 60%, #0A0F18 100%);
+    min-height: 100vh;
 }
-.hero-header::before {
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.hero-wrapper {
+    position: relative;
+    border-radius: 20px;
+    padding: 52px 60px 44px;
+    margin-bottom: 36px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #13102A 0%, #0E1A2E 50%, #111228 100%);
+    border: 1px solid rgba(120, 80, 255, 0.15);
+}
+.hero-wrapper::before {
     content: '';
     position: absolute;
-    top: -50%;
-    right: -10%;
-    width: 400px;
-    height: 400px;
-    background: radial-gradient(circle, rgba(233,69,96,0.12) 0%, transparent 70%);
+    top: -80px; left: -80px;
+    width: 320px; height: 320px;
+    background: radial-gradient(circle, rgba(120, 60, 255, 0.18) 0%, transparent 70%);
     pointer-events: none;
 }
+.hero-wrapper::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; right: -60px;
+    width: 280px; height: 280px;
+    background: radial-gradient(circle, rgba(0, 180, 255, 0.12) 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+}
 .hero-title {
-    font-family: 'Sora', sans-serif;
-    font-size: 2.4rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, #ffffff 30%, #e94560 100%);
+    font-family: 'Syne', sans-serif;
+    font-size: 3.4rem;
+    font-weight: 800;
+    color: #FFFFFF;
+    line-height: 1.0;
+    margin: 0 0 10px;
+    letter-spacing: -0.02em;
+}
+.hero-title .accent {
+    background: linear-gradient(90deg, #A855F7, #3B82F6, #06B6D4);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin: 0 0 0.3rem;
-    line-height: 1.1;
+    background-clip: text;
 }
 .hero-subtitle {
-    color: var(--text-muted);
-    font-size: 1rem;
+    font-size: 0.9rem;
+    color: rgba(180, 170, 220, 0.7);
+    margin: 0;
     font-weight: 300;
+    letter-spacing: 0.03em;
 }
 .hero-badge {
-    display: inline-block;
-    background: rgba(233,69,96,0.15);
-    border: 1px solid rgba(233,69,96,0.4);
-    color: #e94560;
+    background: rgba(168, 85, 247, 0.12);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    color: #C084FC;
+    font-size: 0.76rem;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 100px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    backdrop-filter: blur(6px);
+}
+
+/* ── Section label ───────────────────────────────────────── */
+.section-label {
     font-size: 0.7rem;
     font-weight: 600;
-    letter-spacing: 1.5px;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    padding: 3px 10px;
-    border-radius: 20px;
-    margin-bottom: 0.8rem;
+    color: rgba(150, 130, 200, 0.7);
+    margin-bottom: 12px;
 }
 
-/* ── Upload Panel ── */
-.upload-label {
-    font-size: 0.75rem;
+/* ── Stat chips ──────────────────────────────────────────── */
+.stat-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(120, 80, 255, 0.2);
+    border-radius: 100px;
+    padding: 7px 16px;
+    font-size: 0.82rem;
+    color: rgba(200, 185, 240, 0.85);
+    font-weight: 400;
+    backdrop-filter: blur(4px);
+}
+.stat-chip strong {
+    color: #E2D9FF;
     font-weight: 600;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-    display: block;
 }
 
-/* ── Query Preview ── */
-.query-container {
-    background: var(--surface);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 16px;
-    overflow: hidden;
-    position: relative;
+/* ── Divider ─────────────────────────────────────────────── */
+.custom-divider {
+    border: none;
+    border-top: 1px solid rgba(120, 80, 255, 0.12);
+    margin: 28px 0;
+}
+
+/* ── Upload & input panel ─────────────────────────────────── */
+.upload-panel {
+    background: linear-gradient(160deg, rgba(20,16,40,0.95) 0%, rgba(14,18,38,0.95) 100%);
+    border: 1px solid rgba(120, 80, 255, 0.18);
+    border-radius: 18px;
+    padding: 28px;
+}
+
+/* ── Query preview card ──────────────────────────────────── */
+.query-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(120, 80, 255, 0.18);
+    border-radius: 14px;
+    padding: 18px;
+    margin-top: 16px;
 }
 .query-label {
-    font-family: 'Sora', sans-serif;
     font-size: 0.7rem;
     font-weight: 600;
-    letter-spacing: 2px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
-    color: var(--accent);
-    padding: 0.8rem 1rem 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    color: rgba(150, 130, 200, 0.7);
+    margin-bottom: 10px;
 }
 
-/* ── Results Section ── */
-.section-title {
-    font-family: 'Sora', sans-serif;
-    font-size: 1rem;
-    font-weight: 600;
-    color: #c8d0de;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin: 0 0 1.2rem;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.section-title::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.1), transparent);
+/* ── Result heading ──────────────────────────────────────── */
+.results-heading {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #EDE9FF;
+    margin: 6px 0 22px;
+    letter-spacing: -0.01em;
 }
 
-/* ── Result Card ── */
+/* ── Result card ─────────────────────────────────────────── */
 .result-card {
-    background: var(--surface);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(160deg, rgba(20,16,42,0.98) 0%, rgba(12,18,36,0.98) 100%);
+    border: 1px solid rgba(120, 80, 255, 0.2);
     border-radius: 16px;
-    overflow: hidden;
-    transition: all 0.3s ease;
-    position: relative;
+    padding: 16px;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
     height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+.result-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(168,85,247,0.5), transparent);
 }
 .result-card:hover {
-    border-color: rgba(233,69,96,0.5);
     transform: translateY(-4px);
-    box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 20px rgba(233,69,96,0.1);
-}
-.rank-badge {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    z-index: 10;
-    background: rgba(13,13,26,0.85);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255,255,255,0.12);
-    color: #fff;
-    font-family: 'Sora', sans-serif;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    padding: 3px 8px;
-    border-radius: 8px;
+    border-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 12px 40px rgba(120, 60, 255, 0.18);
 }
 
-/* ── Match Score Bar ── */
-.match-bar-container {
-    padding: 0.9rem 1rem 1rem;
-    border-top: 1px solid rgba(255,255,255,0.06);
-}
-.match-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-}
-.match-label {
+.rank-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #7C3AED, #2563EB);
+    color: #FFFFFF;
     font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-.match-score {
-    font-family: 'Sora', sans-serif;
-    font-size: 1.1rem;
     font-weight: 700;
+    padding: 3px 11px;
+    border-radius: 100px;
+    margin-bottom: 10px;
+    letter-spacing: 0.06em;
 }
-.bar-track {
-    height: 4px;
-    background: rgba(255,255,255,0.07);
-    border-radius: 99px;
+.rank-badge-1 { background: linear-gradient(135deg, #A855F7, #EC4899); }
+.rank-badge-2 { background: linear-gradient(135deg, #7C3AED, #3B82F6); }
+.rank-badge-3 { background: linear-gradient(135deg, #2563EB, #06B6D4); }
+.rank-badge-4 { background: linear-gradient(135deg, #0891B2, #10B981); }
+.rank-badge-5 { background: linear-gradient(135deg, #059669, #84CC16); }
+
+.score-text {
+    font-size: 0.78rem;
+    color: rgba(180, 165, 220, 0.7);
+    margin-top: 10px;
+}
+.score-value {
+    font-weight: 700;
+    color: #C084FC;
+}
+.product-id {
+    font-size: 0.72rem;
+    color: rgba(140, 120, 180, 0.5);
+    margin-top: 3px;
+}
+
+/* ── Score bar ───────────────────────────────────────────── */
+.score-bar-bg {
+    background: rgba(255,255,255,0.06);
+    border-radius: 100px;
+    height: 3px;
+    margin-top: 8px;
     overflow: hidden;
 }
-.bar-fill {
-    height: 100%;
-    border-radius: 99px;
-    transition: width 0.8s ease;
-}
-.card-meta {
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    margin-top: 4px;
+.score-bar-fill {
+    background: linear-gradient(90deg, #7C3AED, #06B6D4);
+    height: 3px;
+    border-radius: 100px;
 }
 
-/* ── Stats Row ── */
-.stat-card {
-    background: var(--surface);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
+/* ── Empty state ─────────────────────────────────────────── */
+.empty-state {
+    height: 360px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, rgba(20,16,42,0.6) 0%, rgba(12,18,36,0.6) 100%);
+    border: 1.5px dashed rgba(120, 80, 255, 0.22);
+    border-radius: 18px;
+    color: rgba(160, 140, 210, 0.5);
+    gap: 14px;
+}
+.empty-icon {
+    font-size: 2.8rem;
+    opacity: 0.5;
+}
+.empty-text {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.88rem;
+    margin: 0;
+    font-weight: 300;
+    letter-spacing: 0.01em;
+}
+
+/* ── Error box ───────────────────────────────────────────── */
+.error-box {
+    background: rgba(220, 38, 38, 0.08);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    border-radius: 14px;
+    padding: 20px 26px;
+    color: #FCA5A5;
+    font-size: 0.9rem;
+}
+.error-box code {
+    background: rgba(220, 38, 38, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+/* ── Footer ──────────────────────────────────────────────── */
+.footer {
     text-align: center;
-}
-.stat-number {
-    font-family: 'Sora', sans-serif;
-    font-size: 1.8rem;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1;
-    margin-bottom: 4px;
-}
-.stat-label {
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: var(--text-muted);
+    font-size: 0.76rem;
+    color: rgba(130, 115, 175, 0.45);
+    font-family: 'Space Grotesk', sans-serif;
+    padding: 8px 0 20px;
 }
 
-/* ── Divider ── */
-hr { border-color: rgba(255,255,255,0.07) !important; margin: 1.5rem 0 !important; }
+/* ── Streamlit radio overrides ───────────────────────────── */
+div[data-testid="stRadio"] label {
+    font-size: 0.88rem !important;
+    color: rgba(200, 185, 240, 0.85) !important;
+}
+div[data-testid="stRadio"] > div {
+    gap: 10px !important;
+}
 
-/* ── Streamlit elements override ── */
-.stFileUploader > div {
-    background: rgba(15,52,96,0.3) !important;
-    border: 1.5px dashed rgba(233,69,96,0.4) !important;
+/* ── File uploader overrides ─────────────────────────────── */
+[data-testid="stFileUploader"] {
+    border: 1.5px dashed rgba(120, 80, 255, 0.3) !important;
     border-radius: 12px !important;
+    background: rgba(255,255,255,0.02) !important;
+    padding: 12px !important;
 }
-.stFileUploader > div:hover {
-    border-color: rgba(233,69,96,0.8) !important;
-    background: rgba(233,69,96,0.05) !important;
+[data-testid="stFileUploader"] label {
+    color: rgba(190, 175, 235, 0.85) !important;
+    font-size: 0.88rem !important;
 }
-.stButton button {
-    background: linear-gradient(135deg, #e94560, #c73652) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 10px !important;
-    font-family: 'Sora', sans-serif !important;
-    font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    letter-spacing: 0.5px !important;
-    padding: 0.55rem 1.5rem !important;
-    transition: all 0.2s ease !important;
-    width: 100% !important;
-}
-.stButton button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 8px 20px rgba(233,69,96,0.35) !important;
-}
+
+/* ── Camera input overrides ──────────────────────────────── */
 [data-testid="stCameraInput"] {
     border-radius: 12px !important;
-    overflow: hidden !important;
 }
-div[data-testid="stSelectbox"] > div {
-    background: rgba(22,33,62,0.8) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
+
+/* ── Spinner text ────────────────────────────────────────── */
+.stSpinner > div {
+    color: #A855F7 !important;
+}
+
+/* ── Warning override ────────────────────────────────────── */
+[data-testid="stWarning"] {
+    background: rgba(245, 158, 11, 0.08) !important;
+    border-color: rgba(245, 158, 11, 0.25) !important;
+    color: #FCD34D !important;
+}
+
+/* ── Column gap override ─────────────────────────────────── */
+[data-testid="column"] {
+    padding: 0 6px !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# HELPERS — replace these with your actual model & dataset logic
-# ────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# MODEL DEFINITION
+# ─────────────────────────────────────────────────────────────
+def build_autoencoder(input_shape=IMG_SHAPE, latent_dim=LATENT_DIM):
+    inputs = Input(shape=input_shape, name="encoder_input")
 
-@st.cache_resource
-def load_model():
-    """Load your embedding model here."""
-    try:
-        # Example: from sentence_transformers import SentenceTransformer
-        # return SentenceTransformer("clip-ViT-B-32")
-        return None  # placeholder
-    except Exception:
-        return None
+    x = Conv2D(32,  (3, 3), activation="relu", padding="same")(inputs)
+    x = MaxPooling2D((2, 2), padding="same")(x)
+    x = Conv2D(64,  (3, 3), activation="relu", padding="same")(x)
+    x = MaxPooling2D((2, 2), padding="same")(x)
+    x = Conv2D(128, (3, 3), activation="relu", padding="same")(x)
+    x = MaxPooling2D((2, 2), padding="same")(x)
+    x = Conv2D(256, (3, 3), activation="relu", padding="same")(x)
+    x = MaxPooling2D((2, 2), padding="same")(x)
 
+    conv_shape = x.shape[1:]
+    x       = Flatten()(x)
+    encoded = Dense(latent_dim, activation="relu", name="latent_space")(x)
 
-@st.cache_data
-def load_dataset():
-    """Load your image dataset + embeddings here.
-    Should return a list of dicts: [{id, path, embedding, category, name}, ...]
-    """
-    # placeholder — returns empty list
-    return []
+    x = Dense(conv_shape[0] * conv_shape[1] * conv_shape[2], activation="relu")(encoded)
+    x = Reshape(conv_shape)(x)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2DTranspose(256, (3, 3), activation="relu", padding="same")(x)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2DTranspose(128, (3, 3), activation="relu", padding="same")(x)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2DTranspose(64,  (3, 3), activation="relu", padding="same")(x)
+    x = UpSampling2D((2, 2))(x)
+    decoded = Conv2DTranspose(3, (3, 3), activation="sigmoid", padding="same",
+                              name="decoder_output")(x)
 
-
-def search_similar(query_image: Image.Image, dataset: list, top_k: int = 10):
-    """
-    Run similarity search.
-    Replace with your actual embedding + cosine similarity logic.
-    Returns list of {id, path, score, rank, category}.
-    """
-    # ── Example placeholder results (remove when wiring real model) ──────────
-    placeholder = [
-        {"id": 5129,  "rank": 1,  "score": 0.543, "name": "Floral Cotton Shirt",   "category": "Casual"},
-        {"id": 14772, "rank": 2,  "score": 0.543, "name": "Slim Fit Oxford Shirt",  "category": "Formal"},
-        {"id": 9659,  "rank": 3,  "score": 0.474, "name": "Striped Dress Shirt",    "category": "Formal"},
-        {"id": 8940,  "rank": 4,  "score": 0.468, "name": "Mandarin Collar Set",    "category": "Smart"},
-        {"id": 7145,  "rank": 5,  "score": 0.438, "name": "Plaid Button-Down",      "category": "Casual"},
-        {"id": 3301,  "rank": 6,  "score": 0.421, "name": "Linen Summer Shirt",     "category": "Casual"},
-        {"id": 2810,  "rank": 7,  "score": 0.408, "name": "Classic White Formal",   "category": "Formal"},
-        {"id": 6644,  "rank": 8,  "score": 0.395, "name": "Denim Western Shirt",    "category": "Casual"},
-        {"id": 11020, "rank": 9,  "score": 0.381, "name": "Batik Heritage Shirt",   "category": "Traditional"},
-        {"id": 4477,  "rank": 10, "score": 0.364, "name": "Technical Sports Shirt", "category": "Sport"},
-    ]
-    return placeholder[:top_k]
+    autoencoder = Model(inputs, decoded, name="autoencoder")
+    encoder     = Model(inputs, encoded, name="encoder")
+    return autoencoder, encoder
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# LAYOUT
-# ────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# CACHED RESOURCES
+# ─────────────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Memuat encoder model…")
+def load_encoder():
+    autoencoder, encoder = build_autoencoder()
+    encoder.load_weights(ENCODER_WEIGHTS)
+    return encoder
 
-# ── Hero Header ──────────────────────────────────────────────────────────────
+
+@st.cache_data(show_spinner="Memuat embedding database…")
+def load_database():
+    db         = joblib.load(DATABASE_PATH)
+    embeddings = db["embeddings"]
+    metadata   = db["metadata"].reset_index(drop=True)
+    return embeddings, metadata
+
+
+# ─────────────────────────────────────────────────────────────
+# INFERENCE
+# ─────────────────────────────────────────────────────────────
+def preprocess_image(pil_image):
+    img = pil_image.convert("RGB").resize(IMG_SIZE)
+    arr = img_to_array(img) / 255.0
+    return np.expand_dims(arr, axis=0)
+
+
+def find_similar(pil_image, encoder_model, db_embeddings, db_df):
+    query_emb = encoder_model.predict(preprocess_image(pil_image), verbose=0)
+    scores    = cosine_similarity(query_emb, db_embeddings)[0]
+    indices   = np.argsort(scores)[::-1][:TOP_K]
+    results   = db_df.iloc[indices].copy().reset_index(drop=True)
+    results["similarity_score"] = scores[indices]
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
+# HERO HEADER
+# ─────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="hero-header">
-    <div class="hero-badge">✦ AI-Powered</div>
-    <div class="hero-title">ShirtFinder</div>
-    <div class="hero-subtitle">Upload a shirt image — find visually similar styles instantly</div>
+<div class="hero-wrapper">
+    <div class="hero-inner">
+        <div>
+            <h1 class="hero-title">Shirt<span class="accent">Finder</span></h1>
+            <p class="hero-subtitle">
+                Visual search · Convolutional Autoencoder + Cosine Similarity
+            </p>
+        </div>
+        <div>
+            <span class="hero-badge">🧵 Shirts Only · Top-5 Results</span>
+        </div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Main columns ─────────────────────────────────────────────────────────────
-col_left, col_right = st.columns([1, 2.6], gap="large")
 
-with col_left:
-    # Input mode tabs
-    mode = st.radio(
-        "Input mode",
-        ["📁 Gallery", "📷 Camera"],
-        horizontal=True,
+# ─────────────────────────────────────────────────────────────
+# CEK ARTEFAK
+# ─────────────────────────────────────────────────────────────
+missing = [f for f in [ENCODER_WEIGHTS, DATABASE_PATH] if not os.path.exists(f)]
+if missing:
+    st.markdown(f"""
+    <div class="error-box">
+        <strong>⚠️ File tidak ditemukan:</strong> {', '.join(f'<code>{f}</code>' for f in missing)}<br><br>
+        Jalankan <code>autoencoder_training_revised.ipynb</code> terlebih dahulu untuk
+        men-generate <code>encoder_weights.h5</code> dan <code>database.pkl</code>.
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+encoder_model        = load_encoder()
+db_embeddings, db_df = load_database()
+
+
+# ─────────────────────────────────────────────────────────────
+# STATS CHIPS
+# ─────────────────────────────────────────────────────────────
+col_s1, col_s2, col_s3, _ = st.columns([1, 1, 1, 4])
+with col_s1:
+    st.markdown(f'<div class="stat-chip">🗂 Database&nbsp;<strong>{len(db_df):,} items</strong></div>',
+                unsafe_allow_html=True)
+with col_s2:
+    st.markdown(f'<div class="stat-chip">🧠 Latent&nbsp;<strong>{LATENT_DIM}d</strong></div>',
+                unsafe_allow_html=True)
+with col_s3:
+    st.markdown(f'<div class="stat-chip">🔎 Top-K&nbsp;<strong>{TOP_K}</strong></div>',
+                unsafe_allow_html=True)
+
+st.markdown('<hr class="custom-divider">', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────
+# INPUT SECTION
+# ─────────────────────────────────────────────────────────────
+left_col, right_col = st.columns([1, 2], gap="large")
+
+with left_col:
+    st.markdown('<p class="section-label">📥 Input Gambar Query</p>', unsafe_allow_html=True)
+
+    input_method = st.radio(
+        "Pilih metode input:",
+        options=["📁 Upload dari galeri", "📷 Foto dengan kamera"],
+        horizontal=False,
         label_visibility="collapsed",
     )
 
-    uploaded_file = None
-    if "Gallery" in mode:
-        st.markdown('<span class="upload-label">📁 Upload Shirt Image</span>', unsafe_allow_html=True)
+    query_image = None
+
+    if input_method == "📁 Upload dari galeri":
         uploaded_file = st.file_uploader(
-            "Upload shirt",
-            type=["jpg", "jpeg", "png", "webp"],
-            label_visibility="collapsed",
+            "Pilih gambar produk (JPG / PNG)",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="visible",
         )
-    else:
-        st.markdown('<span class="upload-label">📷 Take a Photo</span>', unsafe_allow_html=True)
-        uploaded_file = st.camera_input("Camera", label_visibility="collapsed")
+        if uploaded_file:
+            query_image = Image.open(uploaded_file)
 
-    # Settings expander
-    with st.expander("⚙️  Search settings", expanded=False):
-        top_k = st.slider("Results to show", min_value=3, max_value=20, value=10, step=1)
-        min_score = st.slider("Min similarity score", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
-        category_filter = st.multiselect(
-            "Filter by category",
-            ["Casual", "Formal", "Smart", "Traditional", "Sport"],
-            default=[],
-            placeholder="All categories",
+    else:
+        camera_photo = st.camera_input("Arahkan kamera ke produk")
+        if camera_photo:
+            query_image = Image.open(camera_photo)
+
+    if query_image:
+        st.markdown('<div class="query-card">', unsafe_allow_html=True)
+        st.markdown('<p class="query-label">Preview Query</p>', unsafe_allow_html=True)
+        st.image(query_image, use_column_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────
+# RESULT SECTION
+# ─────────────────────────────────────────────────────────────
+RANK_BADGE_CLASSES = ["rank-badge-1", "rank-badge-2", "rank-badge-3", "rank-badge-4", "rank-badge-5"]
+
+with right_col:
+    if query_image:
+        st.markdown('<p class="section-label">✨ Hasil Rekomendasi</p>', unsafe_allow_html=True)
+
+        with st.spinner("Mencari produk serupa…"):
+            results = find_similar(query_image, encoder_model, db_embeddings, db_df)
+
+        st.markdown(
+            f'<p class="results-heading">Top {TOP_K} Produk Paling Mirip</p>',
+            unsafe_allow_html=True,
         )
 
-    st.markdown("<hr>", unsafe_allow_html=True)
+        cols = st.columns(TOP_K, gap="small")
+        for rank, (col, (_, row)) in enumerate(zip(cols, results.iterrows()), start=1):
+            with col:
+                score_pct   = int(row["similarity_score"] * 100)
+                badge_class = RANK_BADGE_CLASSES[rank - 1]
 
-    # Query preview
-    if uploaded_file:
-        query_img = Image.open(uploaded_file).convert("RGB")
-        st.markdown('<div class="query-label">🔍 QUERY IMAGE</div>', unsafe_allow_html=True)
-        st.image(query_img, use_container_width=True)
+                st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
+                st.markdown(
+                    f'<span class="rank-badge {badge_class}">#{rank}</span>',
+                    unsafe_allow_html=True
+                )
 
-        run_search = st.button("Search Similar Shirts ↗", use_container_width=True)
-    else:
-        st.markdown("""
-        <div style="
-            border: 1.5px dashed rgba(255,255,255,0.1);
-            border-radius: 14px;
-            padding: 2.5rem 1rem;
-            text-align: center;
-            color: #556070;
-            margin-top: 0.5rem;
-        ">
-            <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">👔</div>
-            <div style="font-size: 0.85rem; font-weight: 500;">Upload or capture a shirt<br>to start searching</div>
-        </div>
-        """, unsafe_allow_html=True)
-        run_search = False
+                img_path = row["filename"]
+                if os.path.exists(img_path):
+                    st.image(Image.open(img_path), use_column_width=True)
+                else:
+                    st.warning("File tidak ditemukan")
 
-
-# ── Right: Results ────────────────────────────────────────────────────────────
-with col_right:
-    if uploaded_file and run_search:
-        with st.spinner("🔍 Searching through the catalog…"):
-            dataset = load_dataset()
-            results = search_similar(query_img, dataset, top_k=top_k)
-
-        # Filter by category if set
-        if category_filter:
-            results = [r for r in results if r.get("category") in category_filter]
-
-        # Filter by min score
-        results = [r for r in results if r["score"] >= min_score]
-
-        # ── Stats bar ────────────────────────────────────────────────────────
-        s1, s2, s3, s4 = st.columns(4)
-        for col, val, lbl, color in [
-            (s1, len(results), "Matches found", "#e94560"),
-            (s2, f"{results[0]['score']:.3f}" if results else "—", "Best score", "#00c9a7"),
-            (s3, f"{np.mean([r['score'] for r in results]):.3f}" if results else "—", "Avg score", "#f5a623"),
-            (s4, len(set(r.get('category','') for r in results)), "Categories", "#a78bfa"),
-        ]:
-            col.markdown(f"""
-            <div class="stat-card">
-                <div class="stat-number" style="color:{color}">{val}</div>
-                <div class="stat-label">{lbl}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(f'<div class="section-title">Top {len(results)} Results</div>', unsafe_allow_html=True)
-
-        # ── Grid of result cards ─────────────────────────────────────────────
-        cols_per_row = 3
-        for row_start in range(0, len(results), cols_per_row):
-            row_results = results[row_start:row_start + cols_per_row]
-            grid_cols = st.columns(cols_per_row, gap="medium")
-
-            for gc, res in zip(grid_cols, row_results):
-                with gc:
-                    score = res["score"]
-                    pct = int(score * 100)
-
-                    # Color logic for score
-                    if score >= 0.5:
-                        bar_color = "#00c9a7"
-                        score_color = "#00c9a7"
-                    elif score >= 0.4:
-                        bar_color = "#f5a623"
-                        score_color = "#f5a623"
-                    else:
-                        bar_color = "#e94560"
-                        score_color = "#e94560"
-
-                    cat = res.get("category", "Unknown")
-                    name = res.get("name", f"Shirt #{res['id']}")
-                    rank = res["rank"]
-
-                    # Category badge color
-                    cat_colors = {
-                        "Casual": ("#1a3a5c", "#4fc3f7"),
-                        "Formal": ("#1a2e1a", "#81c784"),
-                        "Smart": ("#2e1a3a", "#ce93d8"),
-                        "Traditional": ("#3a2a0a", "#ffb74d"),
-                        "Sport": ("#1a2e3a", "#4dd0e1"),
-                    }
-                    cat_bg, cat_txt = cat_colors.get(cat, ("#2a2a3a", "#aaaacc"))
-
-                    # Try to load actual image, else show placeholder
-                    img_path = res.get("path", "")
-                    img_html = ""
-                    if img_path and os.path.exists(img_path):
-                        st.image(img_path, use_container_width=True)
-                    else:
-                        # Placeholder image area
-                        st.markdown(f"""
-                        <div style="
-                            background: linear-gradient(135deg, #16213e, #0f3460);
-                            height: 220px;
-                            border-radius: 12px 12px 0 0;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-size: 3rem;
-                            position: relative;
-                        ">
-                            <div style="
-                                position: absolute; top: 10px; left: 10px;
-                                background: rgba(13,13,26,0.85);
-                                border: 1px solid rgba(255,255,255,0.12);
-                                color: #fff;
-                                font-family: 'Sora', sans-serif;
-                                font-size: 0.62rem;
-                                font-weight: 700;
-                                letter-spacing: 1px;
-                                padding: 3px 8px;
-                                border-radius: 8px;
-                            ">#{rank}</div>
-                            <div style="
-                                position: absolute; top: 10px; right: 10px;
-                                background: {cat_bg};
-                                color: {cat_txt};
-                                font-size: 0.62rem;
-                                font-weight: 600;
-                                letter-spacing: 0.5px;
-                                padding: 3px 8px;
-                                border-radius: 6px;
-                            ">{cat}</div>
-                            👔
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                    # Score bar + info
-                    st.markdown(f"""
-                    <div style="
-                        background: #16213e;
-                        border: 1px solid rgba(255,255,255,0.07);
-                        border-radius: 0 0 12px 12px;
-                        padding: 0.8rem 1rem 0.9rem;
-                        margin-top: -4px;
-                    ">
-                        <div style="
-                            font-family: 'Sora', sans-serif;
-                            font-size: 0.82rem;
-                            font-weight: 600;
-                            color: #e8eaf0;
-                            margin-bottom: 8px;
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        ">{name}</div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                            <span style="font-size:0.65rem; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:#556070;">SIMILARITY</span>
-                            <span style="font-family:'Sora',sans-serif; font-size:1rem; font-weight:700; color:{score_color};">{score:.3f}</span>
-                        </div>
-                        <div style="height:4px; background:rgba(255,255,255,0.07); border-radius:99px; overflow:hidden;">
-                            <div style="height:100%; width:{pct}%; background:{bar_color}; border-radius:99px;"></div>
-                        </div>
-                        <div style="display:flex; justify-content:space-between; margin-top:6px;">
-                            <span style="font-size:0.65rem; color:#556070;">ID: {res['id']}</span>
-                            <span style="font-size:0.65rem; color:#556070;">{pct}%</span>
-                        </div>
+                st.markdown(f"""
+                    <p class="score-text">
+                        Similarity&nbsp;
+                        <span class="score-value">{row['similarity_score']:.4f}</span>
+                    </p>
+                    <div class="score-bar-bg">
+                        <div class="score-bar-fill" style="width:{score_pct}%"></div>
                     </div>
-                    """, unsafe_allow_html=True)
+                    <p class="product-id">ID: {row['id']}</p>
+                """, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-    elif not uploaded_file:
-        # Empty state
+    else:
         st.markdown("""
-        <div style="
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-            opacity: 0.35;
-            text-align: center;
-        ">
-            <div style="font-size: 5rem; margin-bottom: 1rem;">🔍</div>
-            <div style="font-family: 'Sora', sans-serif; font-size: 1.2rem; font-weight: 600; margin-bottom: 0.5rem;">No query yet</div>
-            <div style="font-size: 0.85rem; color: #8892a4;">Upload a shirt image on the left<br>to find visually similar styles</div>
+        <div class="empty-state">
+            <span class="empty-icon">👕</span>
+            <p class="empty-text">Upload gambar atau ambil foto untuk memulai pencarian</p>
         </div>
         """, unsafe_allow_html=True)
 
-    elif uploaded_file and not run_search:
-        st.markdown("""
-        <div style="
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 400px;
-            opacity: 0.5;
-            text-align: center;
-        ">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">👔</div>
-            <div style="font-family: 'Sora', sans-serif; font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">Image ready</div>
-            <div style="font-size: 0.85rem; color: #8892a4;">Click "Search Similar Shirts" to begin</div>
-        </div>
-        """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────
+# FOOTER
+# ─────────────────────────────────────────────────────────────
+st.markdown('<hr class="custom-divider">', unsafe_allow_html=True)
+st.markdown("""
+<p class="footer">
+    ShirtFinder · Convolutional Autoencoder + Cosine Similarity ·
+    Dataset: <em>paramaggarwal/fashion-product-images-dataset</em>
+</p>
+""", unsafe_allow_html=True)
