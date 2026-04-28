@@ -506,13 +506,15 @@ with left_col:
 
     input_method = st.radio(
         "Pilih metode input:",
-        options=["📁 Upload dari galeri", "📷 Foto dengan kamera"],
+        options=["📁 Upload dari galeri", "📷 Foto dengan kamera", "🔢 Cari by Product ID"],
         horizontal=False,
         label_visibility="collapsed",
     )
 
-    query_image = None
+    query_image    = None
+    query_id_label = None   # untuk ditampilkan di preview
 
+    # ── Metode 1: Upload ──────────────────────────────────────
     if input_method == "📁 Upload dari galeri":
         uploaded_file = st.file_uploader(
             "Pilih gambar produk (JPG / PNG)",
@@ -522,15 +524,59 @@ with left_col:
         if uploaded_file:
             query_image = Image.open(uploaded_file)
 
-    else:
+    # ── Metode 2: Kamera ──────────────────────────────────────
+    elif input_method == "📷 Foto dengan kamera":
         camera_photo = st.camera_input("Arahkan kamera ke produk")
         if camera_photo:
             query_image = Image.open(camera_photo)
 
+    # ── Metode 3: Product ID ──────────────────────────────────
+    else:
+        available_ids = sorted(db_df["id"].tolist())
+        input_id = st.number_input(
+            "Masukkan Product ID",
+            min_value=int(min(available_ids)),
+            max_value=int(max(available_ids)),
+            step=1,
+            help=f"ID tersedia: {len(available_ids):,} produk dalam database",
+        )
+
+        if st.button("🔍 Cari", use_container_width=True):
+            matched = db_df[db_df["id"] == int(input_id)]
+            if matched.empty:
+                st.markdown(
+                    f'<div class="error-box">ID <code>{input_id}</code> tidak ditemukan di database.</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                img_path = matched.iloc[0]["filename"]
+                if not os.path.exists(img_path):
+                    st.markdown(
+                        f'<div class="error-box">File gambar untuk ID <code>{input_id}</code> tidak ada di disk.</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    query_image    = Image.open(img_path)
+                    query_id_label = int(input_id)
+                    # Simpan ke session_state agar tidak hilang saat rerun
+                    st.session_state["id_query_image"] = query_image
+                    st.session_state["id_query_label"] = query_id_label
+
+        # Pertahankan hasil setelah button ditekan (session_state)
+        if query_image is None and "id_query_image" in st.session_state:
+            query_image    = st.session_state["id_query_image"]
+            query_id_label = st.session_state["id_query_label"]
+
+    # ── Preview query ─────────────────────────────────────────
     if query_image:
         st.markdown('<div class="query-card">', unsafe_allow_html=True)
         st.markdown('<p class="query-label">Preview Query</p>', unsafe_allow_html=True)
         st.image(query_image, use_column_width=True)
+        if query_id_label is not None:
+            st.markdown(
+                f'<p class="product-id" style="text-align:center;">ID: {query_id_label}</p>',
+                unsafe_allow_html=True,
+            )
         st.markdown('</div>', unsafe_allow_html=True)
 
 
