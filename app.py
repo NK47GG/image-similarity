@@ -1,3 +1,4 @@
+# app.py revisi - Support Camera Input
 import os
 import sys
 import numpy as np
@@ -82,12 +83,13 @@ html, body, [class*="css"] {
 }
 
 .section-label {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #FFFFFF !important;
-    margin-bottom: 12px;
+    color: #C084FC !important;
+    margin-bottom: 15px;
+    margin-top: 20px;
 }
 
 .result-card {
@@ -104,6 +106,12 @@ html, body, [class*="css"] {
 div[data-testid="stWidgetLabel"] label p {
     color: #FFFFFF !important;
     font-weight: 500 !important;
+}
+
+/* Custom Camera Input Styling */
+[data-testid="stCameraInput"] {
+    border: 1px solid rgba(120, 80, 255, 0.3);
+    border-radius: 15px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -140,10 +148,14 @@ def load_database():
 def load_image_lookup():
     if os.path.exists(LOOKUP_CSV):
         df_img = pd.read_csv(LOOKUP_CSV)
-        if 'filename' in df_img.columns and 'link' in df_img.columns:
-            # Strip .jpg dari filename agar cocok dengan id di database
-            return {str(row['filename']).replace('.jpg', ''): str(row['link']) 
-                    for _, row in df_img.iterrows()}
+        # Mendeteksi kolom link atau filename untuk mapping
+        # Asumsi: CSV punya kolom 'id' atau 'filename' (tanpa .jpg)
+        lookup = {}
+        for _, row in df_img.iterrows():
+            # Kita mapping filename (tanpa ekstensi) ke link URL-nya
+            key = str(row['filename']).replace('.jpg', '')
+            lookup[key] = str(row['link'])
+        return lookup
     return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -171,46 +183,76 @@ image_lookup = load_image_lookup()
 left_col, right_col = st.columns([1, 2], gap="large")
 
 with left_col:
-    st.markdown('<p class="section-label">📥 Input Gambar Query</p>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("Upload kemeja", type=["jpg", "png", "jpeg"], label_visibility="collapsed")
+    st.markdown('<p class="section-label">📥 Pilih Metode Input</p>', unsafe_allow_html=True)
     
-    if uploaded_file:
-        query_img = Image.open(uploaded_file)
-        st.image(query_img, caption="Preview Query", use_column_width=True)
+    # ── WIDGET PILIHAN INPUT ──
+    input_mode = st.radio(
+        "Pilih cara cari:",
+        ["📁 Galeri", "📷 Kamera"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    
+    query_img = None
+    
+    if input_mode == "📁 Galeri":
+        uploaded_file = st.file_uploader("Upload kemeja", type=["jpg", "png", "jpeg"], label_visibility="visible")
+        if uploaded_file:
+            query_img = Image.open(uploaded_file)
+    else:
+        camera_file = st.camera_input("Ambil foto kemeja")
+        if camera_file:
+            query_img = Image.open(camera_file)
+
+    # Preview Query
+    if query_img:
+        st.markdown('<p class="section-label">🔍 Preview Query</p>', unsafe_allow_html=True)
+        st.image(query_img, use_column_width=True)
 
 with right_col:
-    if uploaded_file:
+    if query_img:
         st.markdown('<p class="section-label">✨ Hasil Rekomendasi</p>', unsafe_allow_html=True)
         
         # Preprocess & Predict
-        img_arr = img_to_array(query_img.convert("RGB").resize(IMG_SIZE)) / 255.0
-        query_emb = encoder_model.predict(np.expand_dims(img_arr, axis=0), verbose=0)
-        
-        # Similarity Search
-        scores = cosine_similarity(query_emb, db_embeddings)[0]
-        indices = np.argsort(scores)[::-1][:TOP_K]
-        
+        with st.spinner("Menganalisis gambar..."):
+            img_arr = img_to_array(query_img.convert("RGB").resize(IMG_SIZE)) / 255.0
+            query_emb = encoder_model.predict(np.expand_dims(img_arr, axis=0), verbose=0)
+            
+            # Similarity Search
+            scores = cosine_similarity(query_emb, db_embeddings)[0]
+            indices = np.argsort(scores)[::-1][:TOP_K]
+            
         cols = st.columns(TOP_K, gap="small")
         for rank, idx in enumerate(indices, start=1):
             row = db_df.iloc[idx]
             with cols[rank-1]:
-                pid = str(row['id'])  # <-- paksa string
+                pid = str(row['id'])
                 img_url = image_lookup.get(pid)
- 
+                
                 st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
                 if img_url:
                     st.image(img_url, use_column_width=True)
                 else:
-                    st.warning(f"Gambar tidak ditemukan untuk ID: {pid}")
+                    # Fallback URL jika lookup gagal
+                    fallback_url = f"https://assets.myntassets.com/assets/images/{pid}.jpg"
+                    st.image(fallback_url, use_column_width=True)
+                
                 st.markdown(f"""
                     <p style='color:#AAA; font-size:0.7rem; margin:10px 0 0;'>#{rank}</p>
                     <p style='font-size:0.85rem; color:#FFF;'>Match: <span class="score-value">{scores[idx]:.3f}</span></p>
                     <p style='color:rgba(140,120,180,0.5); font-size:0.7rem;'>ID: {pid}</p>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
-                
-                df_test = pd.read_csv(LOOKUP_CSV)
-                st.write(df_test.columns.tolist())   # lihat nama kolom aslinya
-                st.write(df_test.head(3))            # lihat 3 baris pertama
     else:
-        st.info("Silakan upload gambar untuk melihat hasil.")
+        # Tampilan saat belum ada input
+        st.markdown("""
+        <div style='text-align: center; padding: 100px; color: rgba(255,255,255,0.2);'>
+            <h2 style='font-family:Syne;'>Belum ada input</h2>
+            <p>Silakan upload file atau gunakan kamera di panel sebelah kiri.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────
+# FOOTER
+# ─────────────────────────────────────────────────────────────
+st.markdown("<br><hr style='opacity:0.1'><p style='text-align:center; color:gray; font-size:0.8rem;'>ShirtFinder Visual Search Engine v2.0</p>", unsafe_allow_html=True)
