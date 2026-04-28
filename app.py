@@ -140,8 +140,10 @@ def load_database():
 def load_image_lookup():
     if os.path.exists(LOOKUP_CSV):
         df_img = pd.read_csv(LOOKUP_CSV)
-        if 'id' in df_img.columns and 'link' in df_img.columns:
-            return {str(row['id']): str(row['link']) for _, row in df_img.iterrows()}
+        if 'filename' in df_img.columns and 'link' in df_img.columns:
+            # Strip .jpg dari filename agar cocok dengan id di database
+            return {str(row['filename']).replace('.jpg', ''): str(row['link']) 
+                    for _, row in df_img.iterrows()}
     return {}
 
 # ─────────────────────────────────────────────────────────────
