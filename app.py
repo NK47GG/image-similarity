@@ -207,7 +207,8 @@ with right_col:
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                #st.write(list(image_lookup.items())[:3])  # lihat sample key-value
-                st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
+                df_test = pd.read_csv(LOOKUP_CSV)
+                st.write(df_test.columns.tolist())   # lihat nama kolom aslinya
+                st.write(df_test.head(3))            # lihat 3 baris pertama
     else:
         st.info("Silakan upload gambar untuk melihat hasil.")
