@@ -194,8 +194,7 @@ with right_col:
             with cols[rank-1]:
                 pid = str(row['id'])  # <-- paksa string
                 img_url = image_lookup.get(pid)
-                st.write(list(image_lookup.items())[:3])  # lihat sample key-value
-                st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
+ 
                 st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
                 if true:
                     st.image(img_url, use_column_width=True)
@@ -207,5 +206,7 @@ with right_col:
                     <p style='color:rgba(140,120,180,0.5); font-size:0.7rem;'>ID: {pid}</p>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
+                st.write(list(image_lookup.items())[:3])  # lihat sample key-value
+                st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
     else:
         st.info("Silakan upload gambar untuk melihat hasil.")
