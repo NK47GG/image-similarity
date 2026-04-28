@@ -6,7 +6,7 @@ import streamlit as st
 from PIL import Image
 import joblib
 
-# --- HACK: Menangani isu 'numpy._core' jika ada perbedaan versi ---
+# --- HACK: Menangani isu 'numpy._core' untuk kompatibilitas versi ---
 try:
     import numpy.core
     sys.modules['numpy._core'] = numpy.core
@@ -29,7 +29,6 @@ IMG_SIZE        = (128, 128)
 IMG_SHAPE       = (128, 128, 3)
 LATENT_DIM      = 256
 TOP_K           = 5
-# Sesuaikan dengan nama file di GitHub: encoder_only_weights.weights.h5
 ENCODER_WEIGHTS = "encoder_only_weights.weights.h5"
 DATABASE_PATH   = "database.pkl"
 
@@ -56,7 +55,7 @@ html, body, [class*="css"] {
     background: #F7F4EF;
 }
 
-/* Mengubah warna teks agar tidak putih/samar */
+/* FIX: Warna font label agar tidak putih dan kontras */
 .section-label {
     font-size: 0.72rem;
     font-weight: 600;
@@ -66,6 +65,7 @@ html, body, [class*="css"] {
     margin-bottom: 10px;
 }
 
+/* Memaksa teks widget (Radio & Uploader) menjadi hitam */
 div[data-testid="stWidgetLabel"] label p, 
 div[data-testid="stRadio"] label, 
 div[data-testid="stFileUploader"] label p {
@@ -123,7 +123,7 @@ def build_autoencoder(input_shape=IMG_SHAPE, latent_dim=LATENT_DIM):
     x = Flatten()(x)
     encoded = Dense(latent_dim, activation="relu", name="latent_space")(x)
 
-    # Decoder (Hanya untuk inisialisasi arsitektur agar load weights tidak error)
+    # Decoder hanya sebagai dummy untuk loading weights
     x = Dense(conv_shape[0] * conv_shape[1] * conv_shape[2], activation="relu")(encoded)
     x = Reshape(conv_shape)(x)
     x = UpSampling2D((2, 2))(x)
@@ -135,17 +135,15 @@ def build_autoencoder(input_shape=IMG_SHAPE, latent_dim=LATENT_DIM):
     x = UpSampling2D((2, 2))(x)
     decoded = Conv2DTranspose(3, (3, 3), activation="sigmoid", padding="same")(x)
 
-    autoencoder = Model(inputs, decoded)
-    encoder     = Model(inputs, encoded)
-    return autoencoder, encoder
+    encoder = Model(inputs, encoded)
+    return encoder
 
 # ─────────────────────────────────────────────────────────────
 # CACHED RESOURCES
 # ─────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Memuat encoder model…")
 def load_encoder():
-    _, encoder = build_autoencoder()
-    # Memuat bobot langsung ke encoder karena file .h5 hanya berisi bobot encoder
+    encoder = build_autoencoder()
     encoder.load_weights(ENCODER_WEIGHTS)
     return encoder
 
@@ -174,7 +172,7 @@ st.markdown("""
 <div class="hero-wrapper">
     <div>
         <h1 class="hero-title">Shirt<span>Finder</span></h1>
-        <p class="hero-subtitle">Visual search berbasis Autoencoder + Myntra Assets</p>
+        <p class="hero-subtitle">Visual search berbasis Convolutional Autoencoder</p>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -205,16 +203,17 @@ with right_col:
         cols = st.columns(TOP_K)
         for rank, (col, (_, row)) in enumerate(zip(cols, results.iterrows()), start=1):
             with col:
-                # Ambil gambar langsung dari URL Myntra agar tidak membebani laptop
-                img_url = f"https://assets.myntassets.com/dpr_1.5,q_60,w_400,c_limit,fl_progressive/assets/images/{row['id']}.jpg"
+                # FIX: Ambil gambar dari URL CDN Myntra menggunakan ID Produk
+                product_id = str(row['id'])
+                img_url = f"https://assets.myntassets.com/dpr_1.5,q_60,w_400,c_limit,fl_progressive/assets/images/{product_id}.jpg"
                 
                 st.markdown('<div class="result-card">', unsafe_allow_html=True)
                 st.image(img_url, use_column_width=True)
                 st.markdown(f"""
                     <p style='font-size:0.8rem; color:#888; margin-bottom:2px;'>#{rank}</p>
                     <p style='font-size:0.85rem;'>Match: <span class="score-value">{row['similarity_score']:.2f}</span></p>
-                    <p style='font-size:0.7rem; color:#AAA;'>ID: {row['id']}</p>
+                    <p style='font-size:0.7rem; color:#AAA;'>ID: {product_id}</p>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("Silakan upload gambar kemeja di panel kiri.")
+        st.info("Silakan upload gambar kemeja untuk memulai.")
