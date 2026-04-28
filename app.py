@@ -138,11 +138,10 @@ def load_database():
 
 @st.cache_data
 def load_image_lookup():
-    """Membangun kamus ID -> URL dari kolom 'link' di images.csv"""
     if os.path.exists(LOOKUP_CSV):
         df_img = pd.read_csv(LOOKUP_CSV)
         if 'id' in df_img.columns and 'link' in df_img.columns:
-            return dict(zip(df_img['id'], df_img['link']))
+            return {str(row['id']): str(row['link']) for _, row in df_img.iterrows()}
     return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -193,9 +192,10 @@ with right_col:
         for rank, idx in enumerate(indices, start=1):
             row = db_df.iloc[idx]
             with cols[rank-1]:
-                pid = row['id']
+                pid = str(row['id'])  # <-- paksa string
                 img_url = image_lookup.get(pid)
-
+                st.write(list(image_lookup.items())[:3])  # lihat sample key-value
+                st.write(type(db_df['id'].iloc[0]))       # lihat tipe id di database
                 st.markdown(f'<div class="result-card">', unsafe_allow_html=True)
                 if true:
                     st.image(img_url, use_column_width=True)
